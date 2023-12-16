@@ -49,6 +49,17 @@ trait Parser<'a, Output> {
     {
         BoxedParser::new(pred(self, pred_fn))
     }
+
+    fn and_then<F, NextParser, NewOutput>(self, f: F) -> BoxedParser<'a, NewOutput>
+    where
+        Self: Sized + 'a,
+        Output: 'a,
+        NewOutput: 'a,
+        NextParser: Parser<'a, NewOutput> + 'a,
+        F: Fn(Output) -> NextParser + 'a,
+    {
+        BoxedParser::new(and_then(self, f))
+    }
 }
 
 impl<'a, F, Output> Parser<'a, Output> for F
@@ -234,6 +245,63 @@ fn single_element<'a>() -> impl Parser<'a, Element> {
     })
 }
 
+fn open_element<'a>() -> impl Parser<'a, Element> {
+    left(element_start(), match_literal(">")).map(|(name, attributes)| Element {
+        name,
+        attributes,
+        children: vec![],
+    })
+}
+
+fn either<'a, P1, P2, A>(parser1: P1, parser2: P2) -> impl Parser<'a, A>
+where
+    P1: Parser<'a, A>,
+    P2: Parser<'a, A>,
+{
+    move |input| match parser1.parse(input) {
+        ok @ Ok(_) => ok,
+        Err(_) => parser2.parse(input),
+    }
+}
+
+fn close_element<'a>(expected_name: String) -> impl Parser<'a, String> {
+    right(match_literal("</"), left(identifier, match_literal(">")))
+        .pred(move |name| name == &expected_name)
+}
+
+fn and_then<'a, P, F, A, B, NextP>(parser: P, f: F) -> impl Parser<'a, B>
+where
+    P: Parser<'a, A>,
+    NextP: Parser<'a, B>,
+    F: Fn(A) -> NextP,
+{
+    move |input| match parser.parse(input) {
+        Ok((next_input, result)) => f(result).parse(next_input),
+        Err(err) => Err(err),
+    }
+}
+
+fn parent_element<'a>() -> impl Parser<'a, Element> {
+    open_element().and_then(|el| {
+        left(zero_or_more(element()), close_element(el.name.clone())).map(move |children| {
+            let mut el = el.clone();
+            el.children = children;
+            el
+        })
+    })
+}
+
+fn whitespace_wrap<'a, P, A>(parser: P) -> impl Parser<'a, A>
+where
+    P: Parser<'a, A>,
+{
+    right(space0(), left(parser, space0()))
+}
+
+fn element<'a>() -> impl Parser<'a, Element> {
+    whitespace_wrap(either(single_element(), parent_element()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +413,46 @@ mod tests {
             )),
             single_element().parse("<div class=\"float\"/>")
         );
+    }
+
+    #[test]
+    fn xml_parser() {
+        let doc = r#"
+        <top label="Top">
+            <semi-bottom label="Bottom"/>
+            <middle>
+                <bottom label="Another bottom"/>
+            </middle>
+        </top>"#;
+        let parsed_doc = Element {
+            name: "top".to_string(),
+            attributes: vec![("label".to_string(), "Top".to_string())],
+            children: vec![
+                Element {
+                    name: "semi-bottom".to_string(),
+                    attributes: vec![("label".to_string(), "Bottom".to_string())],
+                    children: vec![],
+                },
+                Element {
+                    name: "middle".to_string(),
+                    attributes: vec![],
+                    children: vec![Element {
+                        name: "bottom".to_string(),
+                        attributes: vec![("label".to_string(), "Another bottom".to_string())],
+                        children: vec![],
+                    }],
+                },
+            ],
+        };
+        assert_eq!(Ok(("", parsed_doc)), element().parse(doc));
+    }
+
+    #[test]
+    fn mismatched_closing_tag() {
+        let doc = r#"
+        <top>
+            <bottom/>
+        </middle>"#;
+        assert_eq!(Err("</middle>"), element().parse(doc));
     }
 }
