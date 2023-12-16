@@ -40,6 +40,15 @@ trait Parser<'a, Output> {
     {
         BoxedParser::new(map(self, map_fn))
     }
+
+    fn pred<F>(self, pred_fn: F) -> BoxedParser<'a, Output>
+    where
+        Self: Sized + 'a,
+        Output: 'a,
+        F: Fn(&Output) -> bool + 'a,
+    {
+        BoxedParser::new(pred(self, pred_fn))
+    }
 }
 
 impl<'a, F, Output> Parser<'a, Output> for F
@@ -198,7 +207,7 @@ fn quoted_string<'a>() -> impl Parser<'a, String> {
     right(
         match_literal("\""),
         left(
-            zero_or_more(pred(any_char, |c| *c != '"')),
+            zero_or_more(any_char.pred(|c| *c != '"')),
             match_literal("\""),
         ),
     )
