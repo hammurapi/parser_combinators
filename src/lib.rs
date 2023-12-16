@@ -1,3 +1,5 @@
+// Source code for the blogpost: https://bodil.lol/parser-combinators/
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Element {
     name: String,
