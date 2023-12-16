@@ -131,4 +131,15 @@ mod tests {
         assert_eq!(Err("oops"), tag_opener.parse("oops"));
         assert_eq!(Err("!oops"), tag_opener.parse("<!oops"));
     }
+
+    #[test]
+    fn right_combinator() {
+        let tag_opener = right(match_literal("<"), identifier);
+        assert_eq!(
+            Ok(("/>", "my-first-element".to_string())),
+            tag_opener.parse("<my-first-element/>")
+        );
+        assert_eq!(Err("oops"), tag_opener.parse("oops"));
+        assert_eq!(Err("!oops"), tag_opener.parse("<!oops"));
+    }
 }
