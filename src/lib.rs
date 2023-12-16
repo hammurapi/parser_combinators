@@ -47,6 +47,33 @@ where
     }
 }
 
+type ParseResult<'a, Output> = Result<(&'a str, Output), &'a str>;
+
+trait Parser<'a, Output> {
+    fn parse(&self, input: &'a str) -> ParseResult<'a, Output>;
+}
+
+impl<'a, F, Output> Parser<'a, Output> for F
+where
+    F: Fn(&'a str) -> ParseResult<Output>,
+{
+    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+        self(input)
+    }
+}
+
+fn map<'a, P, F, A, B>(parser: P, map_fn: F) -> impl Parser<'a, B>
+where
+    P: Parser<'a, A>,
+    F: Fn(A) -> B,
+{
+    move |input| {
+        parser
+            .parse(input)
+            .map(|(next_input, result)| (next_input, map_fn(result)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
