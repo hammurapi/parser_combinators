@@ -1,6 +1,12 @@
+/*
+ * Copyright (C) Siemens AG 2023
+ * All Rights Reserved. Confidential.
+ */
+
 // Source code for the blogpost: https://bodil.lol/parser-combinators/
 
 use std::str::CharIndices;
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -9,7 +15,21 @@ pub enum Value {
     ObjectValue(Vec<(String, Value)>),
 }
 
-type ParseResult<'a, Output> = Result<(&'a str, Output), String>;
+#[derive(Error, Debug)]
+pub enum ParseError {
+    #[error("Identifiers first character is not alphabetic! Position `{0}`!")]
+    IdentifiersFirstCharacterNotAlphabetic(usize),
+    #[error("Premature end of text! Position `{0}`!")]
+    PrematureEndOfText(usize),
+    #[error("Expected literal '{1}' not found! Position `{0}`!")]
+    ExpectedLiteralNotFound(usize, String),
+    #[error("Unknown excaped symbol '{1}'! Position `{0}`!")]
+    UnknownEscapedSymbol(usize, char),
+    #[error("No value found! Position `{0}`!")]
+    NoValueFound(usize),
+}
+
+type ParseResult<'a, Output> = Result<(&'a str, Output), ParseError>;
 
 fn identifier<'a>(text: &'a str) -> ParseResult<'a, String> {
     let mut chars = text.char_indices();
@@ -17,11 +37,11 @@ fn identifier<'a>(text: &'a str) -> ParseResult<'a, String> {
     let first_ident_char = match chars.next() {
         Some(next) => {
             if !next.1.is_alphabetic() {
-                return Err("first char is not alphabetic!".to_string());
+                return Err(ParseError::IdentifiersFirstCharacterNotAlphabetic(0));
             }
             next.1
         }
-        None => return Err("end of text".to_string()),
+        None => return Err(ParseError::PrematureEndOfText(0)),
     };
 
     let last_non_ident_char =
@@ -47,7 +67,7 @@ fn skip_white_space<'a>(text: &'a str) -> ParseResult<'a, ()> {
 fn literal<'a>(text: &'a str, expected: &str) -> ParseResult<'a, String> {
     match text.starts_with(expected) {
         true => Ok((&text[expected.len()..], expected.to_string())),
-        false => Err(format!("'{}' not found", expected)),
+        false => Err(ParseError::ExpectedLiteralNotFound(0, expected.to_string())),
     }
 }
 
@@ -67,20 +87,20 @@ fn single_quoted_string<'a>(text: &'a str) -> ParseResult<'a, String> {
 
                 _ => content.push(next.1),
             },
-            None => return Err("End of text in string".to_string()),
+            None => return Err(ParseError::PrematureEndOfText(0)),
         }
     };
 
     Ok((&text[(last_char.0 + 1)..], content))
 }
 
-fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, String> {
+fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, ParseError> {
     match char_indicies.next() {
         Some(next_after_escape) => match next_after_escape.1 {
             '\'' | '\\' => Ok(next_after_escape.1),
-            _ => Err(format!("Unknown escpaped symbol '{}'", next_after_escape.1)),
+            _ => Err(ParseError::UnknownEscapedSymbol(0, next_after_escape.1)),
         },
-        None => Err("End of text after escape symbol".to_string()),
+        None => Err(ParseError::PrematureEndOfText(0)),
     }
 }
 
@@ -100,7 +120,7 @@ fn key_value_pair<'a>(text: &'a str) -> ParseResult<'a, (String, Value)> {
     Ok((value.0, (key.1, value.1)))
 }
 
-fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
+pub fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
     let text = skip_white_space(text)?.0;
     if text.is_empty() {
         return Ok((text, vec![]));
@@ -221,7 +241,7 @@ fn value<'a>(text: &'a str) -> ParseResult<'a, Value> {
         Err(_) => (),
     };
 
-    Err("No value found".to_string())
+    Err(ParseError::NoValueFound(0))
 }
 
 #[cfg(test)]
