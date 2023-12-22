@@ -5,7 +5,7 @@ use std::str::CharIndices;
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     StringValue(String),
-    ListValue(Vec<String>),
+    ListValue(Vec<Value>),
     ObjectValue(Vec<(String, String)>),
 }
 
@@ -146,7 +146,7 @@ fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> {
     Ok((text, content.1))
 }
 
-fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<String>> {
+fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<Value>> {
     let bracket = literal(text, "[")?;
     let text = bracket.0;
 
@@ -154,7 +154,7 @@ fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<String>> {
 
     let mut values = vec![];
 
-    let first_value = single_quoted_string(text)?;
+    let first_value = value(text)?;
     let mut text = first_value.0;
     values.push(first_value.1);
 
@@ -175,7 +175,7 @@ fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<String>> {
 
         text = skip_white_space(text)?.0;
 
-        let a_value = single_quoted_string(text)?;
+        let a_value = value(text)?;
         text = a_value.0;
         values.push(a_value.1);
     }
@@ -305,11 +305,23 @@ mod tests {
     fn test_list() {
         let output = list("['b';'d']   ").unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, vec!["b", "d"]);
+        assert_eq!(
+            output.1,
+            vec![
+                Value::StringValue("b".to_string()),
+                Value::StringValue("d".to_string())
+            ]
+        );
 
         let output = list("[ 'b' ; 'd' ]   ").unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, vec!["b", "d"]);
+        assert_eq!(
+            output.1,
+            vec![
+                Value::StringValue("b".to_string()),
+                Value::StringValue("d".to_string())
+            ]
+        );
     }
 
     #[test]
@@ -322,7 +334,10 @@ mod tests {
         assert_eq!(output.0, "   ");
         assert_eq!(
             output.1,
-            Value::ListValue(vec!["b".to_string(), "d".to_string()])
+            Value::ListValue(vec![
+                Value::StringValue("b".to_string()),
+                Value::StringValue("d".to_string())
+            ])
         );
 
         let output = value("( a = 'b' ; c = 'd' )   ").unwrap();
