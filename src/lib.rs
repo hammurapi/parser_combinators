@@ -5,8 +5,8 @@ use std::str::CharIndices;
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     StringValue(String),
-    ListValue(Vec<Value>),
-    ObjectValue(Vec<(String, Value)>),
+    ListValue(Vec<String>),
+    ObjectValue(Vec<(String, String)>),
 }
 
 type ParseResult<'a, Output> = Result<(&'a str, Output), String>;
@@ -187,6 +187,25 @@ fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<String>> {
     Ok((text, values))
 }
 
+fn value<'a>(text: &'a str) -> ParseResult<'a, Value> {
+    match single_quoted_string(text) {
+        Ok(value) => return Ok((value.0, Value::StringValue(value.1))),
+        Err(_) => (),
+    };
+
+    match list(text) {
+        Ok(value) => return Ok((value.0, Value::ListValue(value.1))),
+        Err(_) => (),
+    };
+
+    match object(text) {
+        Ok(value) => return Ok((value.0, Value::ObjectValue(value.1))),
+        Err(_) => (),
+    };
+
+    Err("No value found".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +310,29 @@ mod tests {
         let output = list("[ 'b' ; 'd' ]   ").unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(output.1, vec!["b", "d"]);
+    }
+
+    #[test]
+    fn test_value() {
+        let output = value("'a'   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(output.1, Value::StringValue("a".to_string()));
+
+        let output = value("[ 'b' ; 'd' ]   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            Value::ListValue(vec!["b".to_string(), "d".to_string()])
+        );
+
+        let output = value("( a = 'b' ; c = 'd' )   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            Value::ObjectValue(vec![
+                ("a".to_string(), "b".to_string()),
+                ("c".to_string(), "d".to_string())
+            ])
+        );
     }
 }
