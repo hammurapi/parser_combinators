@@ -1,7 +1,4 @@
-/*
- * Copyright (C) Siemens AG 2023
- * All Rights Reserved. Confidential.
- */
+
 
 // Source code for the blogpost: https://bodil.lol/parser-combinators/
 
