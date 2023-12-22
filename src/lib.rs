@@ -1,5 +1,7 @@
 // Source code for the blogpost: https://bodil.lol/parser-combinators/
 
+use std::str::CharIndices;
+
 type ParseResult<'a, Output> = Result<(&'a str, Output), String>;
 
 fn identifier<'a>(text: &'a str) -> ParseResult<'a, String> {
@@ -55,23 +57,8 @@ fn single_quoted_string<'a>(text: &'a str) -> ParseResult<'a, String> {
         match char_indicies.next() {
             Some(next) => match next.1 {
                 '\'' => break next,
-                '\\' => match char_indicies.next() {
-                    Some(next_after_escape) => match next_after_escape.1 {
-                        '\'' => content.push('\''),
-                        '\\' => content.push('\\'),
-                        _ => {
-                            return Err(format!(
-                                "Unknown escpaped symbol '{}'",
-                                next_after_escape.1
-                            ))
-                        }
-                    },
-                    None => {
-                        return Err("End of text after escape
-symbol"
-                            .to_string())
-                    }
-                },
+                '\\' => content.push(escaped_char(&mut char_indicies)?),
+
                 _ => content.push(next.1),
             },
             None => return Err("End of text in string".to_string()),
@@ -95,6 +82,16 @@ fn key_value_pair<'a>(text: &'a str) -> ParseResult<'a, (String, String)> {
     let value = single_quoted_string(text)?;
 
     Ok((value.0, (key.1, value.1)))
+}
+
+fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, String> {
+    match char_indicies.next() {
+        Some(next_after_escape) => match next_after_escape.1 {
+            '\'' | '\\' => Ok(next_after_escape.1),
+            _ => Err(format!("Unknown escpaped symbol '{}'", next_after_escape.1)),
+        },
+        None => Err("End of text after escape symbol".to_string()),
+    }
 }
 
 /*
