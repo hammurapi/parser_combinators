@@ -94,33 +94,35 @@ fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, String> {
     }
 }
 
-/*
-
-fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String,
-String)>> {
-    let key_value_pairs = vec![];
-
+fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> {
     let text = skip_white_space(text)?.0;
-
     if text.is_empty() {
-        return Ok((text, key_value_pairs));
+        return Ok((text, vec![]));
     }
 
-    let key_value_pair = key_value_pair(text)?;
-    let text = key_value_pair.0;
-    key_value_pairs.push(key_value_pair.1);
+    let mut key_value_pairs = vec![];
+
+    let a_key_value_pair = key_value_pair(text)?;
+    let mut text = a_key_value_pair.0;
+    key_value_pairs.push(a_key_value_pair.1);
 
     loop {
-    let text = skip_white_space(text)?.0;
-    match literal(text, ";")? {
-        _ => (),
-        Err(_) => return Ok((key_value_pair.0, key_value_pairs)),
+        let previous_text = text;
+
+        text = skip_white_space(text)?.0;
+        let semicolon = match literal(text, ";") {
+            Ok(output) => output,
+            Err(_) => return Ok((previous_text, key_value_pairs)),
+        };
+        text = semicolon.0;
+
+        text = skip_white_space(text)?.0;
+
+        let a_key_value_pair = key_value_pair(text)?;
+        text = a_key_value_pair.0;
+        key_value_pairs.push(a_key_value_pair.1);
     }
-
-
 }
-
-*/
 
 #[cfg(test)]
 mod tests {
@@ -169,5 +171,28 @@ mod tests {
         let output = key_value_pair("key = 'aßb\\\'\\\\   '   ").unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(output.1, ("key".to_string(), "aßb'\\   ".to_string()));
+    }
+
+    #[test]
+    fn test_key_value_pairs() {
+        let output = key_value_pairs("a='b';c='d'   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            vec![
+                ("a".to_string(), "b".to_string()),
+                ("c".to_string(), "d".to_string())
+            ]
+        );
+
+        let output = key_value_pairs("a = 'b' ; c = 'd'   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            vec![
+                ("a".to_string(), "b".to_string()),
+                ("c".to_string(), "d".to_string())
+            ]
+        );
     }
 }
