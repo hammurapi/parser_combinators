@@ -3,7 +3,7 @@
 use std::str::CharIndices;
 
 #[derive(Debug, Clone, PartialEq)]
-enum Value {
+pub enum Value {
     StringValue(String),
     ListValue(Vec<Value>),
     ObjectValue(Vec<(String, Value)>),
@@ -124,7 +124,12 @@ fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
 
         text = skip_white_space(text)?.0;
 
-        let a_key_value_pair = key_value_pair(text)?;
+        let a_key_value_pair_result = key_value_pair(text);
+        if a_key_value_pair_result.is_err() {
+            return Ok((semicolon.0, key_value_pairs));
+        }
+        let a_key_value_pair = a_key_value_pair_result.unwrap();
+
         text = a_key_value_pair.0;
         key_value_pairs.push(a_key_value_pair.1);
     }
@@ -136,7 +141,13 @@ fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
 
     let text = skip_white_space(text)?.0;
 
-    let content = key_value_pairs(text)?;
+    let content_result = key_value_pairs(text);
+    if content_result.is_err() {
+        let bracket = literal(text, ")")?;
+        let text = bracket.0;
+        return Ok((text, vec![]));
+    }
+    let content = content_result.unwrap();
     let text = content.0;
 
     let text = skip_white_space(text)?.0;
@@ -154,7 +165,14 @@ fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<Value>> {
 
     let mut values = vec![];
 
-    let first_value = value(text)?;
+    let first_value_result = value(text);
+    if first_value_result.is_err() {
+        let bracket = literal(text, "]")?;
+        let text = bracket.0;
+        return Ok((text, vec![]));
+    }
+    let first_value = first_value_result.unwrap();
+
     let mut text = first_value.0;
     values.push(first_value.1);
 
@@ -269,6 +287,16 @@ mod tests {
 
     #[test]
     fn test_key_value_pairs() {
+        let output = key_value_pairs("a='b';c='d';   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            vec![
+                ("a".to_string(), Value::StringValue("b".to_string())),
+                ("c".to_string(), Value::StringValue("d".to_string()))
+            ]
+        );
+
         let output = key_value_pairs("a='b';c='d'   ").unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
@@ -288,10 +316,18 @@ mod tests {
                 ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
+
+        let output = key_value_pairs("   ").unwrap();
+        assert_eq!(output.0, "");
+        assert_eq!(output.1, vec![]);
     }
 
     #[test]
     fn test_object() {
+        let output = object("()   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(output.1, vec![]);
+
         let output = object("(a='b';c='d')   ").unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
@@ -315,6 +351,10 @@ mod tests {
 
     #[test]
     fn test_list() {
+        let output = list("[]   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(output.1, vec![]);
+
         let output = list("['b';'d']   ").unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
@@ -361,5 +401,54 @@ mod tests {
                 ("c".to_string(), Value::StringValue("d".to_string()))
             ])
         );
+    }
+
+    #[test]
+    fn test_valid_option_strings() {
+        let valid_option_strings = vec![
+		"logging=(filePath='test.path')",
+		"logging=(filePath='test.path');",
+		"",
+		" ",
+		"  ",
+		"key=''",
+		"key='value'",
+		" key = 'value' ",
+		"  key = 'value';  key2 = ''  ",
+		"key='\''",
+		"key='\'';key2=''",
+		"key=()",
+		"key=(key='value')",
+		"key=(key='';key2='';key3='')",
+		"key=[]",
+		"key=[()]",
+		"key=[();();()]",
+		"key=[(key='');(key='');(key='')]",
+		"key=[(key='');(key=[(key='');(key='');(key='')]);(key='')]",
+		"key=[(key='';key2=();key3=[]);(key=[(key='');(key='');(key='')]);(key=(key=(key=())))]",
+		"rdfPath='test.path'",
+		"RdfPath='test.path'",
+		"logging=()",
+		"logging=(filePath='')",
+		"logging=(filePath='';maxFiles='10';maxFileSize='1024')",
+		"modules=[]",
+		"modules=[(name='test';type='doip')]",
+		"modules=[(name='test';type='doip';options=(PreselectionMode='None';CombinationMode='DoIP-Group';VendorMode='Daimler';VehicleDiscoveryTime='100';Udp13401='true'))]",
+		"modules=[(name='test1';type='doip';options=(PreselectionMode='None';CombinationMode='DoIP-Group'));(name='test2';type='doip';options=(PreselectionMode='None';CombinationMode='DoIP-Group'))]",
+		"rdfPath='pdu_api_root_TEST.xml';logging=(filePath='sidis-pduapi.log';logLevel='info';maxFileSize='1048576';maxFiles='10');modules=[(name='localDoIpModule';type='doip';options=(PreselectionMode='None';CombinationMode='DoIP-Group';VendorMode='Daimler';VehicleDiscoveryTime='100';Udp13401='true'))]",
+		"rdfPath='pdu_api_root_TEST.xml';logging =(filePath= 'sidis-pduapi.log';logLevel = 'info';maxFileSize   =  '1048576';maxFiles=   '10');modules=[(name   ='localDoIpModule';type    =    'doip';options=(PreselectionMode  = 'None';CombinationMode='DoIP-Group';VendorMode='Daimler';VehicleDiscoveryTime='100';Udp13401='true'))]",
+		" rdfPath =  'pdu_api_root_TEST.xml' ;  logging =( filePath= 'sidis-pduapi.log' ;logLevel = 'info';maxFileSize   =  '1048576';maxFiles=   '10'  ;  ); modules   =[  (  name   ='localDoIpModule';type    =    'doip';options=(PreselectionMode  = 'None' ; CombinationMode='DoIP-Group' ;VendorMode='Daimler'; VehicleDiscoveryTime='100'  ;  Udp13401='true' ; ) ;); ];  ",
+    ];
+
+        for option_string in valid_option_strings {
+            key_value_pairs(option_string).unwrap();
+            /*
+            println!(
+                "key_value_pairs({:?}) = {:?}",
+                option_string,
+                key_value_pairs(option_string).unwrap().1
+            );
+            */
+        }
     }
 }
