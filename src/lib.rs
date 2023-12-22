@@ -125,39 +125,6 @@ String)>> {
 
 */
 
-fn main() {
-    // ---------------------- skip_white_space
-    println!(
-        "skip_white_space('   aßc   ') = {:?}",
-        skip_white_space("  aßc  ")
-    );
-    println!(
-        "skip_white_space('         ') = {:?}",
-        skip_white_space("       ")
-    );
-    // ---------------------- identifier
-    println!("identifier('abc   ') = {:?}", identifier("aßc   "));
-
-    println!("identifier('abc   ') = {:?}", identifier("aßc   "));
-
-    println!("identifier('a   ') = {:?}", identifier("a   "));
-
-    // ---------------------- literal
-    println!("literal('aßb   ') = {:?}", literal("aßc   ", "aßc"));
-
-    // ---------------------- single_quoted_string
-    println!(
-        "single_quoted_string(''aßb\\\'\\\\   '') = {:?}",
-        single_quoted_string("'aßb\\\'\\\\   '")
-    );
-
-    // ---------------------- key_value_pair
-    println!(
-        "key_value_pair('key = 'aßb\\\'\\\\   '') = {:?}",
-        key_value_pair("key = 'aßb\\\'\\\\   '")
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
