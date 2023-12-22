@@ -6,7 +6,7 @@ use std::str::CharIndices;
 enum Value {
     StringValue(String),
     ListValue(Vec<Value>),
-    ObjectValue(Vec<(String, String)>),
+    ObjectValue(Vec<(String, Value)>),
 }
 
 type ParseResult<'a, Output> = Result<(&'a str, Output), String>;
@@ -74,22 +74,6 @@ fn single_quoted_string<'a>(text: &'a str) -> ParseResult<'a, String> {
     Ok((&text[(last_char.0 + 1)..], content))
 }
 
-fn key_value_pair<'a>(text: &'a str) -> ParseResult<'a, (String, String)> {
-    let key = identifier(text)?;
-
-    let text = key.0;
-    let text = skip_white_space(text)?.0;
-
-    let equals = literal(text, "=")?;
-
-    let text = equals.0;
-    let text = skip_white_space(text)?.0;
-
-    let value = single_quoted_string(text)?;
-
-    Ok((value.0, (key.1, value.1)))
-}
-
 fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, String> {
     match char_indicies.next() {
         Some(next_after_escape) => match next_after_escape.1 {
@@ -100,7 +84,23 @@ fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, String> {
     }
 }
 
-fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> {
+fn key_value_pair<'a>(text: &'a str) -> ParseResult<'a, (String, Value)> {
+    let key = identifier(text)?;
+
+    let text = key.0;
+    let text = skip_white_space(text)?.0;
+
+    let equals = literal(text, "=")?;
+
+    let text = equals.0;
+    let text = skip_white_space(text)?.0;
+
+    let value = value(text)?;
+
+    Ok((value.0, (key.1, value.1)))
+}
+
+fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
     let text = skip_white_space(text)?.0;
     if text.is_empty() {
         return Ok((text, vec![]));
@@ -130,7 +130,7 @@ fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> 
     }
 }
 
-fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> {
+fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
     let bracket = literal(text, "(")?;
     let text = bracket.0;
 
@@ -248,11 +248,23 @@ mod tests {
     fn test_key_value_pair() {
         let output = key_value_pair("key='aßb\\\'\\\\   '   ").unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, ("key".to_string(), "aßb'\\   ".to_string()));
+        assert_eq!(
+            output.1,
+            (
+                "key".to_string(),
+                Value::StringValue("aßb'\\   ".to_string())
+            )
+        );
 
         let output = key_value_pair("key = 'aßb\\\'\\\\   '   ").unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, ("key".to_string(), "aßb'\\   ".to_string()));
+        assert_eq!(
+            output.1,
+            (
+                "key".to_string(),
+                Value::StringValue("aßb'\\   ".to_string())
+            )
+        );
     }
 
     #[test]
@@ -262,8 +274,8 @@ mod tests {
         assert_eq!(
             output.1,
             vec![
-                ("a".to_string(), "b".to_string()),
-                ("c".to_string(), "d".to_string())
+                ("a".to_string(), Value::StringValue("b".to_string())),
+                ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
 
@@ -272,8 +284,8 @@ mod tests {
         assert_eq!(
             output.1,
             vec![
-                ("a".to_string(), "b".to_string()),
-                ("c".to_string(), "d".to_string())
+                ("a".to_string(), Value::StringValue("b".to_string())),
+                ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
     }
@@ -285,8 +297,8 @@ mod tests {
         assert_eq!(
             output.1,
             vec![
-                ("a".to_string(), "b".to_string()),
-                ("c".to_string(), "d".to_string())
+                ("a".to_string(), Value::StringValue("b".to_string())),
+                ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
 
@@ -295,8 +307,8 @@ mod tests {
         assert_eq!(
             output.1,
             vec![
-                ("a".to_string(), "b".to_string()),
-                ("c".to_string(), "d".to_string())
+                ("a".to_string(), Value::StringValue("b".to_string())),
+                ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
     }
@@ -345,8 +357,8 @@ mod tests {
         assert_eq!(
             output.1,
             Value::ObjectValue(vec![
-                ("a".to_string(), "b".to_string()),
-                ("c".to_string(), "d".to_string())
+                ("a".to_string(), Value::StringValue("b".to_string())),
+                ("c".to_string(), Value::StringValue("d".to_string()))
             ])
         );
     }
