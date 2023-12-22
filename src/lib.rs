@@ -2,6 +2,13 @@
 
 use std::str::CharIndices;
 
+#[derive(Debug, Clone, PartialEq)]
+enum Value {
+    StringValue(String),
+    ListValue(Vec<Value>),
+    ObjectValue(Vec<(String, Value)>),
+}
+
 type ParseResult<'a, Output> = Result<(&'a str, Output), String>;
 
 fn identifier<'a>(text: &'a str) -> ParseResult<'a, String> {
@@ -46,10 +53,9 @@ fn literal<'a>(text: &'a str, expected: &str) -> ParseResult<'a, String> {
 
 fn single_quoted_string<'a>(text: &'a str) -> ParseResult<'a, String> {
     let start_quote_output = literal(text, "\'")?;
+    let text = start_quote_output.0;
 
     let mut content = String::new();
-
-    let text = start_quote_output.0;
 
     let mut char_indicies = text.char_indices();
 
@@ -102,9 +108,9 @@ fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> 
 
     let mut key_value_pairs = vec![];
 
-    let a_key_value_pair = key_value_pair(text)?;
-    let mut text = a_key_value_pair.0;
-    key_value_pairs.push(a_key_value_pair.1);
+    let first_key_value_pair = key_value_pair(text)?;
+    let mut text = first_key_value_pair.0;
+    key_value_pairs.push(first_key_value_pair.1);
 
     loop {
         let previous_text = text;
@@ -122,6 +128,63 @@ fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> 
         text = a_key_value_pair.0;
         key_value_pairs.push(a_key_value_pair.1);
     }
+}
+
+fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, String)>> {
+    let bracket = literal(text, "(")?;
+    let text = bracket.0;
+
+    let text = skip_white_space(text)?.0;
+
+    let content = key_value_pairs(text)?;
+    let text = content.0;
+
+    let text = skip_white_space(text)?.0;
+
+    let bracket = literal(text, ")")?;
+    let text = bracket.0;
+    Ok((text, content.1))
+}
+
+fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<String>> {
+    let bracket = literal(text, "[")?;
+    let text = bracket.0;
+
+    let text = skip_white_space(text)?.0;
+
+    let mut values = vec![];
+
+    let first_value = single_quoted_string(text)?;
+    let mut text = first_value.0;
+    values.push(first_value.1);
+
+    loop {
+        let previous_text = text;
+
+        text = skip_white_space(text)?.0;
+
+        let semicolon = match literal(text, ";") {
+            Ok(output) => output,
+            Err(_) => {
+                text = previous_text;
+                break;
+            }
+        };
+
+        text = semicolon.0;
+
+        text = skip_white_space(text)?.0;
+
+        let a_value = single_quoted_string(text)?;
+        text = a_value.0;
+        values.push(a_value.1);
+    }
+
+    let text = skip_white_space(text)?.0;
+
+    let bracket = literal(text, "]")?;
+    let text = bracket.0;
+    Ok((text, values))
 }
 
 #[cfg(test)]
@@ -194,5 +257,39 @@ mod tests {
                 ("c".to_string(), "d".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn test_object() {
+        let output = object("(a='b';c='d')   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            vec![
+                ("a".to_string(), "b".to_string()),
+                ("c".to_string(), "d".to_string())
+            ]
+        );
+
+        let output = object("( a = 'b' ; c = 'd' )   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(
+            output.1,
+            vec![
+                ("a".to_string(), "b".to_string()),
+                ("c".to_string(), "d".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_list() {
+        let output = list("['b';'d']   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(output.1, vec!["b", "d"]);
+
+        let output = list("[ 'b' ; 'd' ]   ").unwrap();
+        assert_eq!(output.0, "   ");
+        assert_eq!(output.1, vec!["b", "d"]);
     }
 }
