@@ -1,5 +1,3 @@
-
-
 // Source code for the blogpost: https://bodil.lol/parser-combinators/
 
 use std::str::CharIndices;
@@ -28,7 +26,7 @@ pub enum ParseError {
 
 type ParseResult<'a, Output> = Result<(&'a str, Output), ParseError>;
 
-fn identifier<'a>(text: &'a str) -> ParseResult<'a, String> {
+fn identifier(text: &str) -> ParseResult<String> {
     let mut chars = text.char_indices();
 
     let first_ident_char = match chars.next() {
@@ -52,7 +50,7 @@ fn identifier<'a>(text: &'a str) -> ParseResult<'a, String> {
     }
 }
 
-fn skip_white_space<'a>(text: &'a str) -> ParseResult<'a, ()> {
+fn skip_white_space(text: &str) -> ParseResult<()> {
     let first_no_whitespace = text.char_indices().find(|item| !item.1.is_whitespace());
 
     match first_no_whitespace {
@@ -68,7 +66,7 @@ fn literal<'a>(text: &'a str, expected: &str) -> ParseResult<'a, String> {
     }
 }
 
-fn single_quoted_string<'a>(text: &'a str) -> ParseResult<'a, String> {
+fn single_quoted_string(text: &str) -> ParseResult<String> {
     let start_quote_output = literal(text, "\'")?;
     let text = start_quote_output.0;
 
@@ -91,7 +89,7 @@ fn single_quoted_string<'a>(text: &'a str) -> ParseResult<'a, String> {
     Ok((&text[(last_char.0 + 1)..], content))
 }
 
-fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, ParseError> {
+fn escaped_char(char_indicies: &mut CharIndices) -> Result<char, ParseError> {
     match char_indicies.next() {
         Some(next_after_escape) => match next_after_escape.1 {
             '\'' | '\\' => Ok(next_after_escape.1),
@@ -101,7 +99,7 @@ fn escaped_char<'a>(char_indicies: &mut CharIndices) -> Result<char, ParseError>
     }
 }
 
-fn key_value_pair<'a>(text: &'a str) -> ParseResult<'a, (String, Value)> {
+fn key_value_pair(text: &str) -> ParseResult<(String, Value)> {
     let key = identifier(text)?;
 
     let text = key.0;
@@ -117,7 +115,7 @@ fn key_value_pair<'a>(text: &'a str) -> ParseResult<'a, (String, Value)> {
     Ok((value.0, (key.1, value.1)))
 }
 
-pub fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
+pub fn key_value_pairs(text: &str) -> ParseResult<Vec<(String, Value)>> {
     let text = skip_white_space(text)?.0;
     if text.is_empty() {
         return Ok((text, vec![]));
@@ -152,7 +150,7 @@ pub fn key_value_pairs<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)
     }
 }
 
-fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
+fn object(text: &str) -> ParseResult<Vec<(String, Value)>> {
     let bracket = literal(text, "(")?;
     let text = bracket.0;
 
@@ -174,7 +172,7 @@ fn object<'a>(text: &'a str) -> ParseResult<'a, Vec<(String, Value)>> {
     Ok((text, content.1))
 }
 
-fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<Value>> {
+fn list(text: &str) -> ParseResult<Vec<Value>> {
     let bracket = literal(text, "[")?;
     let text = bracket.0;
 
@@ -222,21 +220,18 @@ fn list<'a>(text: &'a str) -> ParseResult<'a, Vec<Value>> {
     Ok((text, values))
 }
 
-fn value<'a>(text: &'a str) -> ParseResult<'a, Value> {
-    match single_quoted_string(text) {
-        Ok(value) => return Ok((value.0, Value::StringValue(value.1))),
-        Err(_) => (),
-    };
+fn value(text: &str) -> ParseResult<Value> {
+    if let Ok(value) = single_quoted_string(text) {
+        return Ok((value.0, Value::StringValue(value.1)));
+    }
 
-    match list(text) {
-        Ok(value) => return Ok((value.0, Value::ListValue(value.1))),
-        Err(_) => (),
-    };
+    if let Ok(value) = list(text) {
+        return Ok((value.0, Value::ListValue(value.1)));
+    }
 
-    match object(text) {
-        Ok(value) => return Ok((value.0, Value::ObjectValue(value.1))),
-        Err(_) => (),
-    };
+    if let Ok(value) = object(text) {
+        return Ok((value.0, Value::ObjectValue(value.1)));
+    }
 
     Err(ParseError::NoValueFound(0))
 }
