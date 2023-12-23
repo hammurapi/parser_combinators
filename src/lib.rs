@@ -24,9 +24,9 @@ pub enum ParseError {
     NoValueFound(usize),
 }
 
-type ParseResult<'a, Output> = Result<(&'a str, Output), ParseError>;
+type ParseResult<'a, Output> = Result<(&'a str, usize, Output), ParseError>;
 
-fn identifier(text: &str) -> ParseResult<String> {
+fn identifier(text: &str, position: usize) -> ParseResult<String> {
     let mut chars = text.char_indices();
 
     let first_ident_char = match chars.next() {
@@ -36,7 +36,7 @@ fn identifier(text: &str) -> ParseResult<String> {
             }
             next.1
         }
-        None => return Err(ParseError::PrematureEndOfText(0)),
+        None => return Err(ParseError::PrematureEndOfText(position)),
     };
 
     let last_non_ident_char =
@@ -45,195 +45,222 @@ fn identifier(text: &str) -> ParseResult<String> {
     let ident_string = first_ident_char.to_string();
 
     match last_non_ident_char {
-        Some(last) => Ok((&text[last.0..], text[..last.0].to_string())),
-        None => Ok((&text[first_ident_char.len_utf8()..], ident_string)),
+        Some(last) => Ok((
+            &text[last.0..],
+            position + last.0,
+            text[..last.0].to_string(),
+        )),
+        None => Ok((
+            &text[first_ident_char.len_utf8()..],
+            position + first_ident_char.len_utf8(),
+            ident_string,
+        )),
     }
 }
 
-fn skip_white_space(text: &str) -> ParseResult<()> {
+fn skip_white_space(text: &str, position: usize) -> ParseResult<()> {
     let first_no_whitespace = text.char_indices().find(|item| !item.1.is_whitespace());
 
     match first_no_whitespace {
-        Some(item) => Ok((&text[item.0..], ())),
-        None => Ok((&text[text.len()..], ())),
+        Some(item) => Ok((&text[item.0..], position + item.0, ())),
+        None => Ok((&text[text.len()..], position + text.len(), ())),
     }
 }
 
-fn literal<'a>(text: &'a str, expected: &str) -> ParseResult<'a, String> {
+fn literal<'a>(text: &'a str, position: usize, expected: &str) -> ParseResult<'a, String> {
     match text.starts_with(expected) {
-        true => Ok((&text[expected.len()..], expected.to_string())),
-        false => Err(ParseError::ExpectedLiteralNotFound(0, expected.to_string())),
+        true => Ok((
+            &text[expected.len()..],
+            position + expected.len(),
+            expected.to_string(),
+        )),
+        false => Err(ParseError::ExpectedLiteralNotFound(
+            position,
+            expected.to_string(),
+        )),
     }
 }
 
-fn single_quoted_string(text: &str) -> ParseResult<String> {
-    let start_quote_output = literal(text, "\'")?;
-    let text = start_quote_output.0;
+fn single_quoted_string(text: &str, position: usize) -> ParseResult<String> {
+    let start_quote_output = literal(text, position, "\'")?;
+    let (text, position, _) = start_quote_output;
 
     let mut content = String::new();
 
     let mut char_indicies = text.char_indices();
 
+    let mut err_position = position;
     let last_char = loop {
-        match char_indicies.next() {
+        let next_char = char_indicies.next();
+        match next_char {
             Some(next) => match next.1 {
                 '\'' => break next,
-                '\\' => content.push(escaped_char(&mut char_indicies)?),
+                '\\' => content.push(escaped_char(&mut char_indicies, position + next.0)?),
 
                 _ => content.push(next.1),
             },
-            None => return Err(ParseError::PrematureEndOfText(0)),
+            None => return Err(ParseError::PrematureEndOfText(err_position)),
         }
+        err_position = position + next_char.unwrap().0;
     };
 
-    Ok((&text[(last_char.0 + 1)..], content))
+    Ok((&text[(last_char.0 + 1)..], position + last_char.0, content))
 }
 
-fn escaped_char(char_indicies: &mut CharIndices) -> Result<char, ParseError> {
+fn escaped_char(char_indicies: &mut CharIndices, position: usize) -> Result<char, ParseError> {
     match char_indicies.next() {
         Some(next_after_escape) => match next_after_escape.1 {
             '\'' | '\\' => Ok(next_after_escape.1),
-            _ => Err(ParseError::UnknownEscapedSymbol(0, next_after_escape.1)),
+            _ => Err(ParseError::UnknownEscapedSymbol(
+                position,
+                next_after_escape.1,
+            )),
         },
-        None => Err(ParseError::PrematureEndOfText(0)),
+        None => Err(ParseError::PrematureEndOfText(position)),
     }
 }
 
-fn key_value_pair(text: &str) -> ParseResult<(String, Value)> {
-    let key = identifier(text)?;
+fn key_value_pair(text: &str, position: usize) -> ParseResult<(String, Value)> {
+    let key = identifier(text, position)?;
 
-    let text = key.0;
-    let text = skip_white_space(text)?.0;
+    let (text, position, _) = key;
+    let (text, position, _) = skip_white_space(text, position)?;
 
-    let equals = literal(text, "=")?;
+    let equals = literal(text, position, "=")?;
 
-    let text = equals.0;
-    let text = skip_white_space(text)?.0;
+    let (text, position, _) = equals;
+    let (text, position, _) = skip_white_space(text, position)?;
 
-    let value = value(text)?;
+    let value = value(text, position)?;
 
-    Ok((value.0, (key.1, value.1)))
+    Ok((value.0, value.1, (key.2, value.2)))
 }
 
-pub fn key_value_pairs(text: &str) -> ParseResult<Vec<(String, Value)>> {
-    let text = skip_white_space(text)?.0;
+fn key_value_pairs(text: &str, position: usize) -> ParseResult<Vec<(String, Value)>> {
+    let (text, position, _) = skip_white_space(text, position)?;
     if text.is_empty() {
-        return Ok((text, vec![]));
+        return Ok((text, position, vec![]));
     }
 
     let mut key_value_pairs = vec![];
 
-    let first_key_value_pair = key_value_pair(text)?;
+    let first_key_value_pair = key_value_pair(text, position)?;
     let mut text = first_key_value_pair.0;
-    key_value_pairs.push(first_key_value_pair.1);
+    let mut position = first_key_value_pair.1;
+    key_value_pairs.push(first_key_value_pair.2);
 
     loop {
         let previous_text = text;
+        let previous_position = position;
 
-        text = skip_white_space(text)?.0;
-        let semicolon = match literal(text, ";") {
+        (text, position, _) = skip_white_space(text, position)?;
+        let semicolon = match literal(text, position, ";") {
             Ok(output) => output,
-            Err(_) => return Ok((previous_text, key_value_pairs)),
+            Err(_) => return Ok((previous_text, previous_position, key_value_pairs)),
         };
-        text = semicolon.0;
+        (text, position, _) = semicolon;
 
-        text = skip_white_space(text)?.0;
+        (text, position, _) = skip_white_space(text, position)?;
 
-        let a_key_value_pair_result = key_value_pair(text);
+        let a_key_value_pair_result = key_value_pair(text, position);
         if a_key_value_pair_result.is_err() {
-            return Ok((semicolon.0, key_value_pairs));
+            return Ok((semicolon.0, semicolon.1, key_value_pairs));
         }
         let a_key_value_pair = a_key_value_pair_result.unwrap();
 
-        text = a_key_value_pair.0;
-        key_value_pairs.push(a_key_value_pair.1);
+        (text, position, _) = a_key_value_pair;
+        key_value_pairs.push(a_key_value_pair.2);
     }
 }
 
-fn object(text: &str) -> ParseResult<Vec<(String, Value)>> {
-    let bracket = literal(text, "(")?;
-    let text = bracket.0;
+fn object(text: &str, position: usize) -> ParseResult<Vec<(String, Value)>> {
+    let bracket = literal(text, position, "(")?;
+    let (text, position, _) = bracket;
 
-    let text = skip_white_space(text)?.0;
+    let (text, position, _) = skip_white_space(text, position)?;
 
-    let content_result = key_value_pairs(text);
+    let content_result = key_value_pairs(text, position);
     if content_result.is_err() {
-        let bracket = literal(text, ")")?;
-        let text = bracket.0;
-        return Ok((text, vec![]));
+        let (text, position, _) = literal(text, position, ")")?;
+        return Ok((text, position, vec![]));
     }
     let content = content_result.unwrap();
-    let text = content.0;
+    let (text, position, _) = content;
 
-    let text = skip_white_space(text)?.0;
+    let (text, position, _) = skip_white_space(text, position)?;
 
-    let bracket = literal(text, ")")?;
-    let text = bracket.0;
-    Ok((text, content.1))
+    let (text, position, _) = literal(text, position, ")")?;
+
+    Ok((text, position, content.2))
 }
 
-fn list(text: &str) -> ParseResult<Vec<Value>> {
-    let bracket = literal(text, "[")?;
-    let text = bracket.0;
+fn list(text: &str, position: usize) -> ParseResult<Vec<Value>> {
+    let (text, position, _) = literal(text, position, "[")?;
 
-    let text = skip_white_space(text)?.0;
+    let (text, position, _) = skip_white_space(text, position)?;
 
     let mut values = vec![];
 
-    let first_value_result = value(text);
+    let first_value_result = value(text, position);
     if first_value_result.is_err() {
-        let bracket = literal(text, "]")?;
-        let text = bracket.0;
-        return Ok((text, vec![]));
+        let (text, position, _) = literal(text, position, "]")?;
+
+        return Ok((text, position, vec![]));
     }
     let first_value = first_value_result.unwrap();
 
     let mut text = first_value.0;
-    values.push(first_value.1);
+    let mut position = first_value.1;
+    values.push(first_value.2);
 
     loop {
         let previous_text = text;
+        let previous_position = position;
 
-        text = skip_white_space(text)?.0;
+        (text, position, _) = skip_white_space(text, position)?;
 
-        let semicolon = match literal(text, ";") {
+        let semicolon = match literal(text, position, ";") {
             Ok(output) => output,
             Err(_) => {
                 text = previous_text;
+                position = previous_position;
                 break;
             }
         };
 
-        text = semicolon.0;
+        (text, position, _) = semicolon;
 
-        text = skip_white_space(text)?.0;
+        (text, position, _) = skip_white_space(text, position)?;
 
-        let a_value = value(text)?;
-        text = a_value.0;
-        values.push(a_value.1);
+        let a_value = value(text, position)?;
+        (text, position, _) = a_value;
+        values.push(a_value.2);
     }
 
-    let text = skip_white_space(text)?.0;
+    let (text, position, _) = skip_white_space(text, position)?;
 
-    let bracket = literal(text, "]")?;
-    let text = bracket.0;
-    Ok((text, values))
+    let (text, position, _) = literal(text, position, "]")?;
+    Ok((text, position, values))
 }
 
-fn value(text: &str) -> ParseResult<Value> {
-    if let Ok(value) = single_quoted_string(text) {
-        return Ok((value.0, Value::StringValue(value.1)));
+fn value(text: &str, position: usize) -> ParseResult<Value> {
+    if let Ok(value) = single_quoted_string(text, position) {
+        return Ok((value.0, value.1, Value::StringValue(value.2)));
     }
 
-    if let Ok(value) = list(text) {
-        return Ok((value.0, Value::ListValue(value.1)));
+    if let Ok(value) = list(text, position) {
+        return Ok((value.0, value.1, Value::ListValue(value.2)));
     }
 
-    if let Ok(value) = object(text) {
-        return Ok((value.0, Value::ObjectValue(value.1)));
+    if let Ok(value) = object(text, position) {
+        return Ok((value.0, value.1, Value::ObjectValue(value.2)));
     }
 
-    Err(ParseError::NoValueFound(0))
+    Err(ParseError::NoValueFound(position))
+}
+
+pub fn parse_option_string(text: &str) -> Result<(&str, Vec<(String, Value)>), ParseError> {
+    key_value_pairs(text, 0).map(|output| (output.0, output.2))
 }
 
 #[cfg(test)]
@@ -242,54 +269,54 @@ mod tests {
 
     #[test]
     fn test_skip_white_space() {
-        let output = skip_white_space("  aßc  ").unwrap();
+        let output = skip_white_space("  aßc  ", 0).unwrap();
         assert_eq!(output.0, "aßc  ");
 
-        let output = skip_white_space("    ").unwrap();
+        let output = skip_white_space("    ", 0).unwrap();
         assert_eq!(output.0, "");
     }
 
     #[test]
     fn test_identifier() {
-        let output = identifier("aßc   ").unwrap();
+        let output = identifier("aßc   ", 0).unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, "aßc".to_string());
+        assert_eq!(output.2, "aßc".to_string());
 
-        let output = identifier("a   ").unwrap();
+        let output = identifier("a   ", 0).unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, "a".to_string());
+        assert_eq!(output.2, "a".to_string());
     }
 
     #[test]
     fn test_literal() {
-        let output = literal("aßc   ", "aßc").unwrap();
+        let output = literal("aßc   ", 0, "aßc").unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, "aßc".to_string());
+        assert_eq!(output.2, "aßc".to_string());
     }
 
     #[test]
     fn test_single_quoted_string() {
-        let output = single_quoted_string("'aßb\\\'\\\\   '   ").unwrap();
+        let output = single_quoted_string("'aßb\\\'\\\\   '   ", 0).unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, "aßb'\\   ".to_string());
+        assert_eq!(output.2, "aßb'\\   ".to_string());
     }
 
     #[test]
     fn test_key_value_pair() {
-        let output = key_value_pair("key='aßb\\\'\\\\   '   ").unwrap();
+        let output = key_value_pair("key='aßb\\\'\\\\   '   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             (
                 "key".to_string(),
                 Value::StringValue("aßb'\\   ".to_string())
             )
         );
 
-        let output = key_value_pair("key = 'aßb\\\'\\\\   '   ").unwrap();
+        let output = key_value_pair("key = 'aßb\\\'\\\\   '   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             (
                 "key".to_string(),
                 Value::StringValue("aßb'\\   ".to_string())
@@ -299,61 +326,61 @@ mod tests {
 
     #[test]
     fn test_key_value_pairs() {
-        let output = key_value_pairs("a='b';c='d';   ").unwrap();
+        let output = key_value_pairs("a='b';c='d';   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 ("a".to_string(), Value::StringValue("b".to_string())),
                 ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
 
-        let output = key_value_pairs("a='b';c='d'   ").unwrap();
+        let output = key_value_pairs("a='b';c='d'   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 ("a".to_string(), Value::StringValue("b".to_string())),
                 ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
 
-        let output = key_value_pairs("a = 'b' ; c = 'd'   ").unwrap();
+        let output = key_value_pairs("a = 'b' ; c = 'd'   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 ("a".to_string(), Value::StringValue("b".to_string())),
                 ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
 
-        let output = key_value_pairs("   ").unwrap();
+        let output = key_value_pairs("   ", 0).unwrap();
         assert_eq!(output.0, "");
-        assert_eq!(output.1, vec![]);
+        assert_eq!(output.2, vec![]);
     }
 
     #[test]
     fn test_object() {
-        let output = object("()   ").unwrap();
+        let output = object("()   ", 0).unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, vec![]);
+        assert_eq!(output.2, vec![]);
 
-        let output = object("(a='b';c='d')   ").unwrap();
+        let output = object("(a='b';c='d')   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 ("a".to_string(), Value::StringValue("b".to_string())),
                 ("c".to_string(), Value::StringValue("d".to_string()))
             ]
         );
 
-        let output = object("( a = 'b' ; c = 'd' )   ").unwrap();
+        let output = object("( a = 'b' ; c = 'd' )   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 ("a".to_string(), Value::StringValue("b".to_string())),
                 ("c".to_string(), Value::StringValue("d".to_string()))
@@ -363,24 +390,24 @@ mod tests {
 
     #[test]
     fn test_list() {
-        let output = list("[]   ").unwrap();
+        let output = list("[]   ", 0).unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, vec![]);
+        assert_eq!(output.2, vec![]);
 
-        let output = list("['b';'d']   ").unwrap();
+        let output = list("['b';'d']   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 Value::StringValue("b".to_string()),
                 Value::StringValue("d".to_string())
             ]
         );
 
-        let output = list("[ 'b' ; 'd' ]   ").unwrap();
+        let output = list("[ 'b' ; 'd' ]   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             vec![
                 Value::StringValue("b".to_string()),
                 Value::StringValue("d".to_string())
@@ -390,24 +417,24 @@ mod tests {
 
     #[test]
     fn test_value() {
-        let output = value("'a'   ").unwrap();
+        let output = value("'a'   ", 0).unwrap();
         assert_eq!(output.0, "   ");
-        assert_eq!(output.1, Value::StringValue("a".to_string()));
+        assert_eq!(output.2, Value::StringValue("a".to_string()));
 
-        let output = value("[ 'b' ; 'd' ]   ").unwrap();
+        let output = value("[ 'b' ; 'd' ]   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             Value::ListValue(vec![
                 Value::StringValue("b".to_string()),
                 Value::StringValue("d".to_string())
             ])
         );
 
-        let output = value("( a = 'b' ; c = 'd' )   ").unwrap();
+        let output = value("( a = 'b' ; c = 'd' )   ", 0).unwrap();
         assert_eq!(output.0, "   ");
         assert_eq!(
-            output.1,
+            output.2,
             Value::ObjectValue(vec![
                 ("a".to_string(), Value::StringValue("b".to_string())),
                 ("c".to_string(), Value::StringValue("d".to_string()))
@@ -453,14 +480,14 @@ mod tests {
     ];
 
         for option_string in valid_option_strings {
-            key_value_pairs(option_string).unwrap();
+            parse_option_string(option_string).unwrap();
             /*
             println!(
-                "key_value_pairs({:?}) = {:?}",
+                "parse_option_string({:?}) = {:?}",
                 option_string,
-                key_value_pairs(option_string).unwrap().1
+                parse_option_string(option_string).unwrap().1
             );
-            */
+             */
         }
     }
 }
