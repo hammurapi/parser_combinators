@@ -1,5 +1,7 @@
 // Source code for the blogpost: https://bodil.lol/parser-combinators/
 
+mod thing;
+
 use std::str::CharIndices;
 use thiserror::Error;
 
